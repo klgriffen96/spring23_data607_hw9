@@ -1,0 +1,203 @@
+---
+title: "NYTimes API"
+author: "Kayleah Griffen"
+date: "3/20/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+The New York Times web site provides APIs, as described here: https://developer.nytimes.com/apis. The objective of this assignment is to choose one of the New York Times APIs, construct an interface in R to read in the JSON data, and transform it into an R DataFrame. For the purposes of this assignment, I chose to work with the "Archive API" which returns an array of NYT articles for a given month, going back to 1851.
+
+
+## NYTimes API
+
+First, load required packages.
+
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(jsonlite)
+library(lubridate)
+```
+
+In order to use the NYTimes API you need to get an authorization key by creating an account, selecting an App, enabling the app, and making the key, this process is explained here, https://developer.nytimes.com/get-started. 
+
+```{r}
+# NYTAuth <- ""
+NYTAuth <- rstudioapi::askForPassword("Authorization Key")
+```
+
+Now that the key is stored, the NYT website can be queried using the API. Try querying the database.
+
+```{r}
+year <- "2020"
+month <- "3"
+baseurl <- paste0("https://api.nytimes.com/svc/archive/v1/", year, "/", month, ".json?api-key=", NYTAuth, sep="")
+query1 <- fromJSON(baseurl)
+```
+
+Now, take a quick look at some of the aspects of query1.
+
+```{r}
+dim(query1$response$docs)
+colnames(query1$response$docs)
+class(query1$response$docs)
+query1$response$meta
+```
+
+The `query1` contains a list of two elements - one for the meta data, `meta` and one for the `docs` which is the archive of NYT articles. The `docs` dataframe contains 20 variables relevant to the archived article. 
+
+For my interests, I'd like to see the about COVID mention in the months following the outbreak, the relevant information to me is a subset of the `docs` dataframe with the edition of the year and the month.
+
+I will need to be able to call all of the months, write a script to take a start month and year and a number of months and create a dataframe with a list of all of the year, month combinations. 
+
+```{r}
+df_test <- data.frame(year = integer(),
+                month = integer())
+
+months_total = 24
+month_start = 2
+year_start = 2020
+for (i in 0:months_total){
+  
+  if (any((month_start + i)/12 == c(1:months_total))){
+    # special case
+    year <- year_start + (month_start + i - 1) %/% 12
+    month <- 12
+  } else {
+    year <- year_start + (month_start + i) %/% 12
+    month <- (month_start + i) %% 12
+  }
+  df_temp <- data.frame(year = year, month = month)
+  df_test <- rbind(df_test, df_temp)
+}
+
+# df_test
+```
+
+I inspected the dataframe and it has the correct output.
+
+The above script will now be used to help call all the relevant months.
+
+```{r}
+year_start <- 2019
+month_start <- 12
+months_total <- 14
+year_end <- year_start + months_total %/% 12
+month_end <- month_start + months_total %% 12
+
+df <- data.frame(id = integer(),
+                 year = integer(),
+                 month = integer(),
+                 abstract = character(),
+                 web_url = character(),
+                 snippet = character(),
+                 lead_paragraph = character(),
+                 print_section = character(),
+                 print_page = character(),
+                 source = character(),
+                 pub_date = character(),
+                 headline = character())
+  
+  
+for (i in 0:months_total){
+  
+  if (any((month_start + i)/12 == c(1:months_total))){
+    # special case
+    year <- year_start + (month_start + i - 1) %/% 12
+    month <- 12
+  } else {
+    year <- year_start + (month_start + i) %/% 12
+    month <- (month_start + i) %% 12
+  }
+  
+  baseurl <- paste0("https://api.nytimes.com/svc/archive/v1/", year, "/", month, ".json?api-key=", NYTAuth, sep="")
+  
+  query1 <- fromJSON(baseurl)
+  
+  df_query <- query1$response$docs
+  
+  df_temp <- data.frame(id = i+1,
+                 year = year,
+                 month = month,
+                 abstract = df_query$abstract,
+                 web_url = df_query$web_url,
+                 snippet = df_query$snippet,
+                 lead_paragraph = df_query$lead_paragraph,
+                 print_section = df_query$print_section,
+                 print_page = df_query$print_page,
+                 source = df_query$source,
+                 pub_date = df_query$pub_date,
+                 headline = df_query$headline)
+  
+  df <- rbind(df, df_temp)
+}
+```
+
+
+Now the relevant data is in a dataframe that can be used for processing. For a brief analysis I will check for COVID occurrences in the various fields.
+
+```{r}
+covid <- c("covid", "covid19", "covid-19", "pandemic", "sars-cov-2", "coronavirus", "epidemic", "quarantine")
+
+covid_regex <- paste0('\\b', paste(covid, collapse = '\\b|\\b'), '\\b')
+
+df_covid <- data.frame(id = integer(),
+                       covid = integer())
+
+for (i in 1:dim(df)[1]){
+  all_relevant <- str_c(df$headline.main[i], 
+                        df$headline.print_headline[i],
+                        df$abstract[i],
+                        df$lead_paragraph[i],
+                        df$snippet[i])
+  temp <- str_extract_all(all_relevant, regex(covid_regex, ignore_case=TRUE))
+  if (is_empty(temp[[1]])){
+    covid <- 0
+  } else {
+    covid <- 1
+  }
+  
+  df_temp <- data.frame(id = i,
+                        covid = covid)
+  
+  df_covid <- rbind(df_covid, df_temp)
+}
+
+```
+
+Now I can make a plot of those COVID occurrences.
+
+```{r}
+
+
+df_all <- cbind(df, df_covid$covid)
+
+df_covid_pos <- df_all |> filter(`df_covid$covid` == 1) |>
+                mutate(date_string = str_extract(pub_date, "[0-9]+\\-[0-9]+\\-[0-9]+"),
+                       date_date = ymd(date_string)) |>
+                group_by(date_date) |>
+                summarise(count = n()) |>
+                filter(count < 250)
+
+df_covid_pos |> ggplot(aes(x= date_date, y = count)) + 
+                geom_point() + 
+                geom_smooth(method = 'loess', formula = 'y ~ x')
+
+
+```
+
+## Conclusion
+
+The objective of this assignment, to get relevant data from the NYT and construct a dataframe from it, was met. Using the data I was able to do an analysis on Covid-19 in the news throughout the pandemic. A similar approach could be used to investigate the news following other big stories, for example another analysis idea I had was to look at news for Black Lives Matter prior to and after the death of George Floyd. 
+
+
+
+
+
+
+
