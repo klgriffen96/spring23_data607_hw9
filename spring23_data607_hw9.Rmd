@@ -139,7 +139,7 @@ for (i in 0:months_total){
 ```
 
 
-Now the relevant data is in a dataframe that can be used for processing. For a brief analysis I will check for COVID occurrences in the various fields.
+Now the relevant data is in a dataframe that can be used for processing. For a brief analysis I will check for COVID occurrences in the various fields. A similiar approach was used in Project 3 for detecting skills matches.
 
 ```{r}
 covid <- c("covid", "covid19", "covid-19", "pandemic", "sars-cov-2", "coronavirus", "epidemic", "quarantine")
